@@ -30,7 +30,10 @@ import {
   Bot,
   ExternalLink,
   GitCompare,
+  FileSpreadsheet,
+  FileText,
 } from "lucide-react"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 interface Lead {
   id: number
@@ -46,41 +49,13 @@ interface Lead {
   status: string
   data_coleta: string
   socios?: any[]
+  endereco?: string // Added for enriched data
 }
-
-const mockLeads: Lead[] = [
-  {
-    id: 1,
-    cnpj: "12.345.678/0001-90",
-    razao_social: "Silva Advocacia Ltda",
-    nome_socio: "Dr. João Silva",
-    telefone: "(85) 98765-4321",
-    email: "joao.silva@adv.com.br",
-    cidade: "Fortaleza",
-    uf: "CE",
-    fonte: "Casa dos Dados",
-    status: "novo",
-    data_coleta: "2025-01-14T10:30:00",
-  },
-  {
-    id: 2,
-    cnpj: "98.765.432/0001-10",
-    razao_social: "Santos Jurídico S/A",
-    nome_socio: "Dra. Maria Santos",
-    telefone: "(85) 99876-5432",
-    email: "maria.santos@juridico.com.br",
-    cidade: "Fortaleza",
-    uf: "CE",
-    fonte: "Receita Federal",
-    status: "qualificado",
-    data_coleta: "2025-01-14T09:15:00",
-  },
-]
 
 export default function DashboardPage() {
   const router = useRouter()
-  const [leads, setLeads] = useState<Lead[]>(mockLeads)
-  const [filteredLeads, setFilteredLeads] = useState<Lead[]>(mockLeads)
+  const [leads, setLeads] = useState<Lead[]>([])
+  const [filteredLeads, setFilteredLeads] = useState<Lead[]>([])
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState("todos")
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -102,6 +77,28 @@ export default function DashboardPage() {
       router.push("/login")
     }
   }, [router])
+
+  useEffect(() => {
+    const loadLeads = async () => {
+      try {
+        console.log("[v0] Carregando leads da API...")
+        const response = await fetch("/api/leads")
+
+        if (!response.ok) {
+          throw new Error("Erro ao carregar leads")
+        }
+
+        const data = await response.json()
+        console.log("[v0] Leads carregados:", data)
+        setLeads(data)
+      } catch (error) {
+        console.error("[v0] Erro ao carregar leads:", error)
+        // Manter array vazio em caso de erro
+      }
+    }
+
+    loadLeads()
+  }, [])
 
   useEffect(() => {
     let filtered = leads
@@ -200,15 +197,55 @@ export default function DashboardPage() {
     }, 2000)
   }
 
-  const handleExport = () => {
+  const handleExportExcel = async () => {
+    try {
+      const XLSX = await import("xlsx")
+
+      const data = filteredLeads.map((lead) => ({
+        "Nome da Empresa": lead.razao_social,
+        "Nome do Sócio": lead.nome_socio,
+        Telefone: lead.telefone,
+        Email: lead.email,
+        CNPJ: lead.cnpj,
+        Cidade: lead.cidade,
+        UF: lead.uf || "",
+        Fonte: lead.fonte,
+        Status: lead.status,
+        "Data Coleta": new Date(lead.data_coleta).toLocaleString("pt-BR"),
+      }))
+
+      const ws = XLSX.utils.json_to_sheet(data)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, "Leads")
+
+      // Use writeFile which works in browser
+      XLSX.writeFile(wb, `leads-${new Date().toISOString().split("T")[0]}.xlsx`)
+    } catch (error) {
+      console.error("Erro ao exportar Excel:", error)
+      alert("Erro ao exportar para Excel. Tente novamente.")
+    }
+  }
+
+  const handleExportCSV = () => {
     const csv = [
-      ["CNPJ", "Razão Social", "Nome do Sócio", "Telefone", "Email", "Cidade", "UF", "Fonte", "Status", "Data Coleta"],
+      [
+        "Nome da Empresa",
+        "Nome do Sócio",
+        "Telefone",
+        "Email",
+        "CNPJ",
+        "Cidade",
+        "UF",
+        "Fonte",
+        "Status",
+        "Data Coleta",
+      ],
       ...filteredLeads.map((lead) => [
-        lead.cnpj,
         lead.razao_social,
         lead.nome_socio,
         lead.telefone,
         lead.email,
+        lead.cnpj,
         lead.cidade,
         lead.uf || "",
         lead.fonte,
@@ -216,15 +253,56 @@ export default function DashboardPage() {
         new Date(lead.data_coleta).toLocaleString("pt-BR"),
       ]),
     ]
-      .map((row) => row.join(","))
+      .map((row) => row.map((cell) => `"${cell}"`).join(","))
       .join("\n")
 
-    const blob = new Blob([csv], { type: "text/csv" })
+    const BOM = "\uFEFF"
+    const blob = new Blob([BOM + csv], { type: "text/csv;charset=utf-8;" })
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
     a.download = `leads-${new Date().toISOString().split("T")[0]}.csv`
     a.click()
+    window.URL.revokeObjectURL(url)
+  }
+
+  const handleExportPDF = async () => {
+    try {
+      const { jsPDF } = await import("jspdf")
+      const autoTable = (await import("jspdf-autotable")).default
+
+      const doc = new jsPDF()
+
+      doc.setFontSize(18)
+      doc.text("Relatório de Leads", 14, 20)
+
+      doc.setFontSize(10)
+      doc.text(`Gerado em: ${new Date().toLocaleString("pt-BR")}`, 14, 28)
+      doc.text(`Total de leads: ${filteredLeads.length}`, 14, 34)
+
+      const tableData = filteredLeads.map((lead) => [
+        lead.razao_social,
+        lead.nome_socio,
+        lead.telefone,
+        lead.email,
+        lead.cnpj,
+        `${lead.cidade}${lead.uf ? ` - ${lead.uf}` : ""}`,
+        lead.status,
+      ])
+
+      autoTable(doc, {
+        startY: 40,
+        head: [["Empresa", "Sócio", "Telefone", "Email", "CNPJ", "Localização", "Status"]],
+        body: tableData,
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [99, 102, 241] },
+      })
+
+      doc.save(`leads-${new Date().toISOString().split("T")[0]}.pdf`)
+    } catch (error) {
+      console.error("Erro ao exportar PDF:", error)
+      alert("Erro ao exportar para PDF. Tente novamente.")
+    }
   }
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -250,8 +328,45 @@ export default function DashboardPage() {
       }
 
       if (data.leads && data.leads.length > 0) {
-        setLeads([...data.leads, ...leads])
-        alert(`${data.leads.length} leads importados com sucesso!`)
+        const enrichedLeads = await Promise.all(
+          data.leads.map(async (lead: Lead) => {
+            // If CNPJ exists, fetch real data
+            if (lead.cnpj && lead.cnpj.replace(/\D/g, "").length === 14) {
+              try {
+                const cnpjResponse = await fetch("/api/cnpj/search", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ cnpj: lead.cnpj }),
+                })
+
+                if (cnpjResponse.ok) {
+                  const cnpjData = await cnpjResponse.json()
+                  if (cnpjData.success && cnpjData.data) {
+                    // Merge real data with imported data
+                    return {
+                      ...lead,
+                      razao_social: cnpjData.data.razao_social || lead.razao_social,
+                      nome_fantasia: cnpjData.data.nome_fantasia,
+                      nome_socio: cnpjData.data.socios?.[0]?.nome || lead.nome_socio, // Corrected to access name property
+                      telefone: cnpjData.data.telefone || lead.telefone,
+                      email: cnpjData.data.email || lead.email,
+                      cidade: cnpjData.data.cidade || lead.cidade,
+                      uf: cnpjData.data.uf || lead.uf,
+                      endereco: cnpjData.data.endereco,
+                      fonte: cnpjData.data.sources?.join(", ") || "Importação + APIs",
+                    }
+                  }
+                }
+              } catch (error) {
+                console.error(`Erro ao buscar dados do CNPJ ${lead.cnpj}:`, error)
+              }
+            }
+            return lead
+          }),
+        )
+
+        setLeads([...enrichedLeads, ...leads])
+        alert(`${enrichedLeads.length} leads importados e enriquecidos com dados reais!`)
       }
     } catch (error: any) {
       alert(error.message || "Erro ao importar arquivo")
@@ -501,7 +616,7 @@ export default function DashboardPage() {
                     ) : (
                       <Upload className="w-4 h-4 mr-2" />
                     )}
-                    Importar Excel
+                    Importar
                   </span>
                 </Button>
               </label>
@@ -528,10 +643,30 @@ export default function DashboardPage() {
                 <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
                 Atualizar
               </Button>
-              <Button variant="outline" size="sm" onClick={handleExport}>
-                <Download className="w-4 h-4 mr-2" />
-                Exportar CSV
-              </Button>
+
+              {/* Dropdown Menu for Export Options */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Download className="w-4 h-4 mr-2" />
+                    Exportar
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={handleExportExcel}>
+                    <FileSpreadsheet className="w-4 h-4 mr-2" />
+                    Exportar Excel (.xlsx)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleExportCSV}>
+                    <FileText className="w-4 h-4 mr-2" />
+                    Exportar CSV (.csv)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleExportPDF}>
+                    <FileText className="w-4 h-4 mr-2" />
+                    Exportar PDF (.pdf)
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </Card>
@@ -635,6 +770,262 @@ export default function DashboardPage() {
                                 {lead.uf && ` - ${lead.uf}`}
                               </p>
                             </div>
+
+                            <div>
+                              <p className="text-sm text-muted-foreground mb-1">Fonte</p>
+                              <Badge variant="outline">{lead.fonte}</Badge>
+                            </div>
+
+                            <div>
+                              <p className="text-sm text-muted-foreground mb-1">Data de Coleta</p>
+                              <p className="font-semibold">{new Date(lead.data_coleta).toLocaleString("pt-BR")}</p>
+                            </div>
+
+                            <div className="border-t pt-6">
+                              <p className="text-sm font-semibold mb-4">Entrar em Contato</p>
+                              <div className="grid grid-cols-3 gap-3">
+                                <Dialog>
+                                  <DialogTrigger asChild>
+                                    <Button
+                                      variant="outline"
+                                      className="w-full bg-transparent"
+                                      onClick={() => {
+                                        setContactMethod("whatsapp")
+                                        setContactMessage(
+                                          `Olá ${lead.nome_socio}, tudo bem? Vi que você é sócio da ${lead.razao_social} e gostaria de conversar sobre uma oportunidade.`,
+                                        )
+                                      }}
+                                    >
+                                      <MessageSquare className="w-4 h-4 mr-2" />
+                                      WhatsApp
+                                    </Button>
+                                  </DialogTrigger>
+                                  <DialogContent>
+                                    <DialogHeader>
+                                      <DialogTitle>Enviar mensagem via WhatsApp</DialogTitle>
+                                    </DialogHeader>
+                                    <div className="space-y-4">
+                                      <div>
+                                        <p className="text-sm text-muted-foreground mb-2">Para: {lead.telefone}</p>
+                                        <Textarea
+                                          value={contactMessage}
+                                          onChange={(e) => setContactMessage(e.target.value)}
+                                          rows={6}
+                                          placeholder="Digite sua mensagem..."
+                                        />
+                                      </div>
+                                      <Button
+                                        onClick={handleSendContact}
+                                        disabled={isSendingContact}
+                                        className="w-full"
+                                      >
+                                        {isSendingContact ? (
+                                          <>
+                                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                            Enviando...
+                                          </>
+                                        ) : (
+                                          <>
+                                            <MessageSquare className="w-4 h-4 mr-2" />
+                                            Enviar WhatsApp
+                                          </>
+                                        )}
+                                      </Button>
+                                    </div>
+                                  </DialogContent>
+                                </Dialog>
+
+                                <Dialog>
+                                  <DialogTrigger asChild>
+                                    <Button
+                                      variant="outline"
+                                      className="w-full bg-transparent"
+                                      onClick={() => {
+                                        setContactMethod("email")
+                                        setContactMessage(
+                                          `Prezado(a) ${lead.nome_socio},\n\nEspero que esta mensagem o(a) encontre bem.\n\nMeu nome é [SEU NOME] e gostaria de conversar sobre uma oportunidade para ${lead.razao_social}.\n\nPodemos agendar uma conversa?\n\nAtenciosamente,`,
+                                        )
+                                      }}
+                                    >
+                                      <Mail className="w-4 h-4 mr-2" />
+                                      Email
+                                    </Button>
+                                  </DialogTrigger>
+                                  <DialogContent>
+                                    <DialogHeader>
+                                      <DialogTitle>Enviar email</DialogTitle>
+                                    </DialogHeader>
+                                    <div className="space-y-4">
+                                      <div>
+                                        <p className="text-sm text-muted-foreground mb-2">Para: {lead.email}</p>
+                                        <Textarea
+                                          value={contactMessage}
+                                          onChange={(e) => setContactMessage(e.target.value)}
+                                          rows={8}
+                                          placeholder="Digite sua mensagem..."
+                                        />
+                                      </div>
+                                      <Button
+                                        onClick={handleSendContact}
+                                        disabled={isSendingContact}
+                                        className="w-full"
+                                      >
+                                        {isSendingContact ? (
+                                          <>
+                                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                            Enviando...
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Mail className="w-4 h-4 mr-2" />
+                                            Enviar Email
+                                          </>
+                                        )}
+                                      </Button>
+                                    </div>
+                                  </DialogContent>
+                                </Dialog>
+
+                                <Dialog>
+                                  <DialogTrigger asChild>
+                                    <Button
+                                      variant="outline"
+                                      className="w-full bg-transparent"
+                                      onClick={() => {
+                                        setContactMethod("ai")
+                                        setContactMessage("")
+                                      }}
+                                    >
+                                      <Bot className="w-4 h-4 mr-2" />
+                                      IA
+                                    </Button>
+                                  </DialogTrigger>
+                                  <DialogContent>
+                                    <DialogHeader>
+                                      <DialogTitle>Contato Automático com IA</DialogTitle>
+                                    </DialogHeader>
+                                    <div className="space-y-4">
+                                      <p className="text-sm text-muted-foreground">
+                                        A IA irá gerar e enviar automaticamente uma mensagem personalizada para{" "}
+                                        {lead.nome_socio} via WhatsApp e Email, baseada no perfil da empresa e histórico
+                                        de interações.
+                                      </p>
+                                      <div className="bg-muted p-4 rounded-lg">
+                                        <p className="text-sm font-semibold mb-2">Mensagem será enviada para:</p>
+                                        <p className="text-sm">WhatsApp: {lead.telefone}</p>
+                                        <p className="text-sm">Email: {lead.email}</p>
+                                      </div>
+                                      <Button
+                                        onClick={handleSendContact}
+                                        disabled={isSendingContact}
+                                        className="w-full"
+                                      >
+                                        {isSendingContact ? (
+                                          <>
+                                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                            Gerando e enviando...
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Bot className="w-4 h-4 mr-2" />
+                                            Enviar com IA
+                                          </>
+                                        )}
+                                      </Button>
+                                    </div>
+                                  </DialogContent>
+                                </Dialog>
+                              </div>
+                            </div>
+                          </div>
+                        </DialogContent>
+                      </Dialog>
+                    </td>
+                    <td className="p-4">
+                      <Dialog>
+                        <DialogTrigger asChild>
+                          <button
+                            onClick={() => setSelectedLead(lead)}
+                            className="text-sm font-mono hover:text-primary hover:underline cursor-pointer"
+                          >
+                            {lead.cnpj}
+                          </button>
+                        </DialogTrigger>
+                        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+                          <DialogHeader>
+                            <DialogTitle className="text-2xl">{lead.razao_social}</DialogTitle>
+                          </DialogHeader>
+                          <div className="space-y-6">
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <p className="text-sm text-muted-foreground mb-1">CNPJ</p>
+                                <div className="flex items-center gap-2">
+                                  <p className="font-mono font-semibold">{lead.cnpj}</p>
+                                  <a
+                                    href={`https://cnpjfy.com/${lead.cnpj.replace(/\D/g, "")}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-primary hover:underline"
+                                  >
+                                    <ExternalLink className="w-4 h-4" />
+                                  </a>
+                                </div>
+                              </div>
+                              <div>
+                                <p className="text-sm text-muted-foreground mb-1">Status</p>
+                                <Badge
+                                  variant={
+                                    lead.status === "qualificado"
+                                      ? "default"
+                                      : lead.status === "novo"
+                                        ? "secondary"
+                                        : "destructive"
+                                  }
+                                >
+                                  {lead.status === "novo"
+                                    ? "Novo"
+                                    : lead.status === "qualificado"
+                                      ? "Qualificado"
+                                      : "Descartado"}
+                                </Badge>
+                              </div>
+                            </div>
+
+                            <div>
+                              <p className="text-sm text-muted-foreground mb-1">Nome Fantasia</p>
+                              <p className="font-semibold">{lead.nome_fantasia || "Não informado"}</p>
+                            </div>
+
+                            <div>
+                              <p className="text-sm text-muted-foreground mb-1">Sócio Principal</p>
+                              <p className="font-semibold">{lead.nome_socio}</p>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <p className="text-sm text-muted-foreground mb-1">Telefone</p>
+                                <p className="font-semibold">{lead.telefone}</p>
+                              </div>
+                              <div>
+                                <p className="text-sm text-muted-foreground mb-1">Email</p>
+                                <p className="font-semibold text-sm">{lead.email}</p>
+                              </div>
+                            </div>
+
+                            <div>
+                              <p className="text-sm text-muted-foreground mb-1">Localização</p>
+                              <p className="font-semibold">
+                                {lead.cidade}
+                                {lead.uf && ` - ${lead.uf}`}
+                              </p>
+                            </div>
+
+                            {(lead as any).endereco && (
+                              <div>
+                                <p className="text-sm text-muted-foreground mb-1">Endereço Completo</p>
+                                <p className="font-semibold">{(lead as any).endereco}</p>
+                              </div>
+                            )}
 
                             <div>
                               <p className="text-sm text-muted-foreground mb-1">Fonte</p>

@@ -26,7 +26,6 @@ export async function POST(request: Request) {
     console.log("[v0] CNPJ.ws:", cnpjWsData)
     console.log("[v0] CNPJá:", cnpjaData)
 
-    // Consolida os dados das 3 fontes
     const consolidatedData = consolidateData(receitaData, cnpjWsData, cnpjaData, cnpjLimpo)
 
     return NextResponse.json(consolidatedData)
@@ -115,9 +114,9 @@ function consolidateData(
   let telefone = ""
   let cidade = ""
   let uf = ""
+  let endereco = ""
   let socios: any[] = []
 
-  // Processa ReceitaWS
   if (receitaResult.status === "fulfilled" && receitaResult.value) {
     const data = receitaResult.value
     sources.push("ReceitaWS")
@@ -128,6 +127,10 @@ function consolidateData(
     cidade = cidade || data.municipio || ""
     uf = uf || data.uf || ""
 
+    if (data.logradouro) {
+      endereco = `${data.logradouro}, ${data.numero || "S/N"} - ${data.bairro || ""}, ${data.municipio || ""} - ${data.uf || ""}, CEP: ${data.cep || ""}`
+    }
+
     if (data.qsa && Array.isArray(data.qsa)) {
       socios = data.qsa.map((s: any) => ({
         nome: s.nome,
@@ -136,7 +139,6 @@ function consolidateData(
     }
   }
 
-  // Processa CNPJ.ws
   if (cnpjWsResult.status === "fulfilled" && cnpjWsResult.value) {
     const data = cnpjWsResult.value
     sources.push("CNPJ.ws")
@@ -151,6 +153,11 @@ function consolidateData(
     cidade = cidade || data.estabelecimento?.cidade?.nome || ""
     uf = uf || data.estabelecimento?.estado?.sigla || ""
 
+    if (!endereco && data.estabelecimento) {
+      const est = data.estabelecimento
+      endereco = `${est.tipo_logradouro || ""} ${est.logradouro || ""}, ${est.numero || "S/N"} - ${est.bairro || ""}, ${est.cidade?.nome || ""} - ${est.estado?.sigla || ""}, CEP: ${est.cep || ""}`
+    }
+
     if (data.socios && Array.isArray(data.socios)) {
       socios =
         socios.length > 0
@@ -162,7 +169,6 @@ function consolidateData(
     }
   }
 
-  // Processa CNPJá
   if (cnpjaResult.status === "fulfilled" && cnpjaResult.value) {
     const data = cnpjaResult.value
     sources.push("CNPJá")
@@ -172,6 +178,11 @@ function consolidateData(
     telefone = telefone || (data.phones?.[0] ? `(${data.phones[0].area}) ${data.phones[0].number}` : "")
     cidade = cidade || data.address?.city || ""
     uf = uf || data.address?.state || ""
+
+    if (!endereco && data.address) {
+      const addr = data.address
+      endereco = `${addr.street || ""}, ${addr.number || "S/N"} - ${addr.district || ""}, ${addr.city || ""} - ${addr.state || ""}, CEP: ${addr.zip || ""}`
+    }
 
     if (data.company?.members && Array.isArray(data.company.members)) {
       socios =
@@ -184,18 +195,20 @@ function consolidateData(
     }
   }
 
-  // Retorna dados consolidados
   return {
     success: sources.length > 0,
     sources,
-    cnpj,
-    razao_social: razaoSocial,
-    nome_fantasia: nomeFantasia,
-    email,
-    telefone,
-    cidade,
-    uf,
-    socios,
+    data: {
+      cnpj,
+      razao_social: razaoSocial,
+      nome_fantasia: nomeFantasia,
+      email,
+      telefone,
+      cidade,
+      uf,
+      endereco,
+      socios,
+    },
     data_coleta: new Date().toISOString(),
   }
 }
