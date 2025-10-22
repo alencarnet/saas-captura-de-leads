@@ -328,11 +328,15 @@ export default function DashboardPage() {
       }
 
       if (data.leads && data.leads.length > 0) {
+        console.log("[v0] Iniciando enriquecimento de", data.leads.length, "leads...")
+
         const enrichedLeads = await Promise.all(
           data.leads.map(async (lead: Lead) => {
-            // If CNPJ exists, fetch real data
+            // Se o CNPJ existe e é válido, buscar dados reais
             if (lead.cnpj && lead.cnpj.replace(/\D/g, "").length === 14) {
               try {
+                console.log("[v0] Buscando dados para CNPJ:", lead.cnpj)
+
                 const cnpjResponse = await fetch("/api/cnpj/search", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
@@ -341,34 +345,39 @@ export default function DashboardPage() {
 
                 if (cnpjResponse.ok) {
                   const cnpjData = await cnpjResponse.json()
+                  console.log("[v0] Dados recebidos para", lead.cnpj, ":", cnpjData)
+
                   if (cnpjData.success && cnpjData.data) {
-                    // Merge real data with imported data
+                    // Consolidar dados reais com dados importados
                     return {
                       ...lead,
                       razao_social: cnpjData.data.razao_social || lead.razao_social,
                       nome_fantasia: cnpjData.data.nome_fantasia,
-                      nome_socio: cnpjData.data.socios?.[0]?.nome || lead.nome_socio, // Corrected to access name property
+                      nome_socio: cnpjData.data.socios?.[0] || lead.nome_socio,
                       telefone: cnpjData.data.telefone || lead.telefone,
                       email: cnpjData.data.email || lead.email,
                       cidade: cnpjData.data.cidade || lead.cidade,
                       uf: cnpjData.data.uf || lead.uf,
                       endereco: cnpjData.data.endereco,
+                      socios: cnpjData.data.socios,
                       fonte: cnpjData.data.sources?.join(", ") || "Importação + APIs",
                     }
                   }
                 }
               } catch (error) {
-                console.error(`Erro ao buscar dados do CNPJ ${lead.cnpj}:`, error)
+                console.error(`[v0] Erro ao buscar dados do CNPJ ${lead.cnpj}:`, error)
               }
             }
             return lead
           }),
         )
 
+        console.log("[v0] Leads enriquecidos:", enrichedLeads)
         setLeads([...enrichedLeads, ...leads])
         alert(`${enrichedLeads.length} leads importados e enriquecidos com dados reais!`)
       }
     } catch (error: any) {
+      console.error("[v0] Erro na importação:", error)
       alert(error.message || "Erro ao importar arquivo")
     } finally {
       setIsUploading(false)

@@ -115,7 +115,7 @@ function consolidateData(
   let cidade = ""
   let uf = ""
   let endereco = ""
-  let socios: any[] = []
+  let socios: string[] = [] // Array de strings com nomes dos sócios
 
   if (receitaResult.status === "fulfilled" && receitaResult.value) {
     const data = receitaResult.value
@@ -132,10 +132,7 @@ function consolidateData(
     }
 
     if (data.qsa && Array.isArray(data.qsa)) {
-      socios = data.qsa.map((s: any) => ({
-        nome: s.nome,
-        qualificacao: s.qual,
-      }))
+      socios = data.qsa.map((s: any) => s.nome || "")
     }
   }
 
@@ -158,14 +155,8 @@ function consolidateData(
       endereco = `${est.tipo_logradouro || ""} ${est.logradouro || ""}, ${est.numero || "S/N"} - ${est.bairro || ""}, ${est.cidade?.nome || ""} - ${est.estado?.sigla || ""}, CEP: ${est.cep || ""}`
     }
 
-    if (data.socios && Array.isArray(data.socios)) {
-      socios =
-        socios.length > 0
-          ? socios
-          : data.socios.map((s: any) => ({
-              nome: s.nome,
-              qualificacao: s.qualificacao_socio?.descricao || "",
-            }))
+    if (data.socios && Array.isArray(data.socios) && socios.length === 0) {
+      socios = data.socios.map((s: any) => s.nome || "")
     }
   }
 
@@ -184,16 +175,21 @@ function consolidateData(
       endereco = `${addr.street || ""}, ${addr.number || "S/N"} - ${addr.district || ""}, ${addr.city || ""} - ${addr.state || ""}, CEP: ${addr.zip || ""}`
     }
 
-    if (data.company?.members && Array.isArray(data.company.members)) {
-      socios =
-        socios.length > 0
-          ? socios
-          : data.company.members.map((s: any) => ({
-              nome: s.name,
-              qualificacao: s.role?.text || "",
-            }))
+    if (data.company?.members && Array.isArray(data.company.members) && socios.length === 0) {
+      socios = data.company.members.map((s: any) => s.name || "")
     }
   }
+
+  console.log("[v0] Dados consolidados:", {
+    razaoSocial,
+    nomeFantasia,
+    email,
+    telefone,
+    cidade,
+    uf,
+    endereco,
+    socios,
+  })
 
   return {
     success: sources.length > 0,
@@ -207,7 +203,7 @@ function consolidateData(
       cidade,
       uf,
       endereco,
-      socios,
+      socios, // Array de strings com nomes dos sócios
     },
     data_coleta: new Date().toISOString(),
   }
