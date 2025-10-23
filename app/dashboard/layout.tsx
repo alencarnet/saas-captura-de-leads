@@ -1,44 +1,24 @@
 "use client"
 
 import type React from "react"
-
 import { Sidebar } from "@/components/sidebar"
 import { ToastContainer } from "@/components/toast-notification"
-import { useState, createContext, useContext } from "react"
-
-interface Toast {
-  id: string
-  type: "success" | "error" | "info" | "loading"
-  message: string
-}
-
-interface ToastContextType {
-  showToast: (type: Toast["type"], message: string) => string
-  hideToast: (id: string) => void
-}
-
-const ToastContext = createContext<ToastContextType | null>(null)
-
-export function useToast() {
-  const context = useContext(ToastContext)
-  if (!context) {
-    throw new Error("useToast must be used within ToastProvider")
-  }
-  return context
-}
+import { ToastContext } from "@/components/toast-context"
+import type { Toast } from "@/components/toast-context"
+import { useState, useCallback } from "react"
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([])
 
-  const showToast = (type: Toast["type"], message: string) => {
+  const showToast = useCallback((type: Toast["type"], message: string) => {
     const id = Math.random().toString(36).substring(7)
     setToasts((prev) => [...prev, { id, type, message }])
     return id
-  }
+  }, [])
 
-  const hideToast = (id: string) => {
+  const hideToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== id))
-  }
+  }, [])
 
   return (
     <ToastContext.Provider value={{ showToast, hideToast }}>

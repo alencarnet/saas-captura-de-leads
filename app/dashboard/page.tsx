@@ -3,16 +3,8 @@
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Users, TrendingUp, MessageSquare, Target, ArrowUp, ArrowDown, Clock, DollarSign } from "lucide-react"
-import { useToast } from "./layout"
-import { useEffect } from "react"
 
 export default function DashboardPage() {
-  const { showToast } = useToast()
-
-  useEffect(() => {
-    showToast("success", "Dashboard carregado com sucesso!")
-  }, [])
-
   const stats = [
     {
       title: "Total de Leads",

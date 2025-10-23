@@ -1,68 +1,72 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { createClient } from "@/lib/supabase/server"
+import { NextResponse } from "next/server"
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
-    const { phone, message, leadId } = await request.json()
+    const supabase = await createClient()
+    const { chatId, message } = await request.json()
 
-    console.log("[v0] Sending WhatsApp to:", phone)
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
 
-    // WhatsApp Cloud API integration
-    // In production, you would use the actual WhatsApp Business API
-    const whatsappApiUrl = "https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/messages"
-    const accessToken = process.env.WHATSAPP_ACCESS_TOKEN
-
-    if (!accessToken) {
-      console.log("[v0] WhatsApp API token not configured, simulating send")
-      // Simulate successful send for demo
-      return NextResponse.json({
-        success: true,
-        messageId: `sim_${Date.now()}`,
-        status: "sent",
-        phone,
-      })
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    // Actual WhatsApp API call
-    const response = await fetch(whatsappApiUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        to: phone.replace(/\D/g, ""), // Remove non-digits
-        type: "text",
-        text: {
-          body: message,
+    // Check if user has active WhatsApp session
+    const { data: session } = await supabase.from("whatsapp_sessions").select("*").eq("user_id", user.id).single()
+
+    if (!session || session.status !== "connected") {
+      return NextResponse.json(
+        {
+          error: "WhatsApp not connected",
         },
-      }),
+        { status: 400 },
+      )
+    }
+
+    // In production, this would send via whatsapp-web.js
+    // For now, we'll save to database
+    const messageId = `msg_${Date.now()}`
+
+    const { error: insertError } = await supabase.from("whatsapp_messages").insert({
+      user_id: user.id,
+      chat_id: chatId,
+      message_id: messageId,
+      from_number: session.phone_number || "",
+      to_number: chatId.replace("@c.us", ""),
+      body: message,
+      timestamp: Date.now(),
+      is_from_me: true,
     })
 
-    const data = await response.json()
-
-    if (!response.ok) {
-      throw new Error(data.error?.message || "WhatsApp API error")
+    if (insertError) {
+      return NextResponse.json({ error: insertError.message }, { status: 500 })
     }
 
-    console.log("[v0] WhatsApp sent successfully:", data.messages?.[0]?.id)
-
-    // Save to database
-    // await db.whatsappMessages.create({
-    //   leadId,
-    //   phone,
-    //   message,
-    //   status: 'sent',
-    //   messageId: data.messages[0].id
-    // })
+    // Update contact last message time
+    await supabase
+      .from("whatsapp_contacts")
+      .update({
+        last_message_at: new Date().toISOString(),
+        unread_count: 0,
+      })
+      .eq("user_id", user.id)
+      .eq("contact_id", chatId)
 
     return NextResponse.json({
       success: true,
-      messageId: data.messages?.[0]?.id,
-      status: "sent",
+      messageId,
     })
   } catch (error) {
-    console.error("[v0] WhatsApp send error:", error)
-    return NextResponse.json({ error: "Failed to send WhatsApp message" }, { status: 500 })
+    console.error("[v0] Send message error:", error)
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : "Failed to send message",
+      },
+      { status: 500 },
+    )
   }
 }
