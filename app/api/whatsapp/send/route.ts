@@ -27,9 +27,28 @@ export async function POST(request: Request) {
       )
     }
 
-    // In production, this would send via whatsapp-web.js
-    // For now, we'll save to database
-    const messageId = `msg_${Date.now()}`
+    const WHATSAPP_API_URL = process.env.WHATSAPP_API_URL || "https://whatsapp-api-cdz6.onrender.com"
+    const API_KEY = process.env.WHATSAPP_API_KEY || "B6D711FCDE4D4FD5936544120E713976"
+
+    const sendResponse = await fetch(`${WHATSAPP_API_URL}/message/sendText/${session.instance_name}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: API_KEY,
+      },
+      body: JSON.stringify({
+        number: chatId.replace("@c.us", ""),
+        text: message,
+      }),
+    })
+
+    if (!sendResponse.ok) {
+      const errorData = await sendResponse.json()
+      throw new Error(errorData.message || "Failed to send message")
+    }
+
+    const sendData = await sendResponse.json()
+    const messageId = sendData.key?.id || `msg_${Date.now()}`
 
     const { error: insertError } = await supabase.from("whatsapp_messages").insert({
       user_id: user.id,

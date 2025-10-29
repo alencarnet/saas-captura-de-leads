@@ -1,11 +1,13 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 
+const WHATSAPP_API_URL = process.env.WHATSAPP_API_URL || "https://whatsapp-api-cdz6.onrender.com"
+const API_KEY = process.env.WHATSAPP_API_KEY || "B6D711FCDE4D4FD5936544120E713976"
+
 export async function POST() {
   try {
     const supabase = await createClient()
 
-    // Get authenticated user
     const {
       data: { user },
       error: authError,
@@ -15,52 +17,69 @@ export async function POST() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    // Check if user already has a session
-    const { data: existingSession } = await supabase
-      .from("whatsapp_sessions")
-      .select("*")
-      .eq("user_id", user.id)
-      .single()
+    const instanceName = `user_${user.id.replace(/-/g, "_")}`
 
-    if (existingSession && existingSession.status === "connected") {
-      return NextResponse.json(
-        {
-          error: "WhatsApp already connected",
-          session: existingSession,
-        },
-        { status: 400 },
-      )
+    console.log("[v0] Creating WhatsApp instance:", instanceName)
+
+    const createResponse = await fetch(`${WHATSAPP_API_URL}/instance/create`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: API_KEY,
+      },
+      body: JSON.stringify({
+        instanceName,
+        qrcode: true,
+        integration: "WHATSAPP-BAILEYS",
+      }),
+    })
+
+    if (!createResponse.ok) {
+      const errorData = await createResponse.json()
+      console.error("[v0] Evolution API error:", errorData)
+      throw new Error(errorData.message || "Failed to create instance")
     }
 
-    // Generate a mock QR code for now (in production, this would come from whatsapp-web.js)
-    const mockQRCode = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=whatsapp-${user.id}-${Date.now()}`
+    const instanceData = await createResponse.json()
+    console.log("[v0] Instance created:", instanceData)
 
-    // Create or update session
-    const { data: session, error: sessionError } = await supabase
-      .from("whatsapp_sessions")
-      .upsert(
-        {
-          user_id: user.id,
-          status: "qr_ready",
-          qr_code: mockQRCode,
-          updated_at: new Date().toISOString(),
-        },
-        {
-          onConflict: "user_id",
-        },
-      )
-      .select()
-      .single()
+    const qrResponse = await fetch(`${WHATSAPP_API_URL}/instance/connect/${instanceName}`, {
+      headers: {
+        apikey: API_KEY,
+      },
+    })
 
-    if (sessionError) {
-      console.error("[v0] Error creating session:", sessionError)
-      return NextResponse.json({ error: sessionError.message }, { status: 500 })
+    if (!qrResponse.ok) {
+      throw new Error("Failed to get QR code")
+    }
+
+    const qrData = await qrResponse.json()
+    console.log("[v0] QR Code received")
+
+    // Save session to database
+    const { error: upsertError } = await supabase.from("whatsapp_sessions").upsert(
+      {
+        user_id: user.id,
+        instance_name: instanceName,
+        qr_code: qrData.base64 || qrData.code,
+        status: "qr_ready",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      {
+        onConflict: "user_id",
+      },
+    )
+
+    if (upsertError) {
+      console.error("[v0] Database error:", upsertError)
+      throw new Error(upsertError.message)
     }
 
     return NextResponse.json({
       success: true,
-      qrCode: mockQRCode,
-      session,
+      qrCode: qrData.base64 || qrData.code,
+      instanceName,
     })
   } catch (error) {
     console.error("[v0] WhatsApp connect error:", error)

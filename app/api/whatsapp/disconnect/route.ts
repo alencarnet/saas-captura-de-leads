@@ -1,6 +1,9 @@
 import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 
+const WHATSAPP_API_URL = process.env.WHATSAPP_API_URL || "https://whatsapp-api-cdz6.onrender.com"
+const API_KEY = process.env.WHATSAPP_API_KEY || "B6D711FCDE4D4FD5936544120E713976"
+
 export async function POST() {
   try {
     const supabase = await createClient()
@@ -12,6 +15,21 @@ export async function POST() {
 
     if (authError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    const { data: session } = await supabase.from("whatsapp_sessions").select("*").eq("user_id", user.id).single()
+
+    if (session?.instance_name) {
+      try {
+        await fetch(`${WHATSAPP_API_URL}/instance/delete/${session.instance_name}`, {
+          method: "DELETE",
+          headers: {
+            apikey: API_KEY,
+          },
+        })
+      } catch (apiError) {
+        console.error("[v0] Evolution API disconnect failed:", apiError)
+      }
     }
 
     // Update session status to disconnected

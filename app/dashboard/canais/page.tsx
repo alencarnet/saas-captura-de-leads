@@ -3,56 +3,10 @@
 import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { MessageSquare, Instagram, Mail, Phone, CheckCircle, XCircle, Loader2, QrCode } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { MessageSquare, Instagram, Mail, Phone, CheckCircle, XCircle, Loader2, QrCode, AlertCircle } from "lucide-react"
 import { useToast } from "@/components/toast-context"
-import Image from "next/image"
-
-interface Channel {
-  id: string
-  name: string
-  icon: any
-  color: string
-  connected: boolean
-  description: string
-}
-
-const channels: Channel[] = [
-  {
-    id: "whatsapp",
-    name: "WhatsApp",
-    icon: MessageSquare,
-    color: "text-green-500",
-    connected: false,
-    description: "Integração multi-tenant real",
-  },
-  {
-    id: "instagram",
-    name: "Instagram Direct",
-    icon: Instagram,
-    color: "text-pink-500",
-    connected: false,
-    description: "Solução não oficial",
-  },
-  {
-    id: "email",
-    name: "Email",
-    icon: Mail,
-    color: "text-blue-500",
-    connected: false,
-    description: "SMTP para envio de emails",
-  },
-  {
-    id: "sms",
-    name: "SMS",
-    icon: Phone,
-    color: "text-orange-500",
-    connected: false,
-    description: "Envio de SMS via API",
-  },
-]
 
 export default function CanaisPage() {
   const { showToast } = useToast()
@@ -61,12 +15,21 @@ export default function CanaisPage() {
   )
   const [qrCode, setQrCode] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-  const [whatsappNumber, setWhatsappNumber] = useState("")
-  const [instagramUser, setInstagramUser] = useState("")
+  const [mode, setMode] = useState<"production" | "demo">("demo")
+  const [phoneNumber, setPhoneNumber] = useState("")
 
   useEffect(() => {
     checkWhatsAppStatus()
-  }, [])
+
+    let interval: NodeJS.Timeout
+    if (whatsappStatus === "qr_ready") {
+      interval = setInterval(checkWhatsAppStatus, 5000)
+    }
+
+    return () => {
+      if (interval) clearInterval(interval)
+    }
+  }, [whatsappStatus])
 
   const checkWhatsAppStatus = async () => {
     try {
@@ -75,6 +38,7 @@ export default function CanaisPage() {
 
       if (data.session) {
         setWhatsappStatus(data.session.status)
+        setPhoneNumber(data.session.phone_number || "")
         if (data.session.qr_code) {
           setQrCode(data.session.qr_code)
         }
@@ -102,12 +66,17 @@ export default function CanaisPage() {
 
       setWhatsappStatus("qr_ready")
       setQrCode(data.qrCode)
-      showToast("QR Code gerado! Escaneie com seu WhatsApp", "success")
+      setMode(data.mode || "demo")
+      showToast(
+        data.mode === "demo" ? "QR Code de demonstração gerado" : "QR Code gerado! Escaneie com seu WhatsApp",
+        "success",
+      )
 
-      // Simulate connection after 5 seconds (in production, this would be a webhook)
-      setTimeout(async () => {
-        await simulateConnection()
-      }, 5000)
+      if (data.mode === "demo") {
+        setTimeout(async () => {
+          await simulateConnection()
+        }, 8000)
+      }
     } catch (error) {
       console.error("[v0] Connect error:", error)
       showToast("Erro ao conectar WhatsApp", "error")
@@ -146,6 +115,7 @@ export default function CanaisPage() {
       if (response.ok) {
         setWhatsappStatus("disconnected")
         setQrCode(null)
+        setPhoneNumber("")
         showToast("WhatsApp desconectado", "success")
       }
     } catch (error) {
@@ -156,16 +126,23 @@ export default function CanaisPage() {
     }
   }
 
-  const handleConnect = (channelId: string) => {
-    showToast(`Canal ${channelId} conectado com sucesso!`, "success")
-  }
-
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold">Canais de Comunicação</h1>
         <p className="text-muted-foreground">Conecte seu WhatsApp para gerenciar conversas (Multi-tenant)</p>
       </div>
+
+      {mode === "demo" && whatsappStatus !== "disconnected" && (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            <strong>Modo Demonstração:</strong> Para usar WhatsApp real, configure a variável de ambiente{" "}
+            <code className="bg-muted px-1 py-0.5 rounded">WHATSAPP_API_URL</code> apontando para seu microserviço
+            WhatsApp.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* WhatsApp - Real Integration */}
@@ -194,25 +171,36 @@ export default function CanaisPage() {
                   </Badge>
                 )}
               </div>
-              <p className="text-sm text-muted-foreground">Integração multi-tenant real</p>
+              <p className="text-sm text-muted-foreground">
+                {phoneNumber ? `Conectado: ${phoneNumber}` : "Integração multi-tenant real"}
+              </p>
             </div>
           </div>
 
           {whatsappStatus === "qr_ready" && qrCode && (
-            <div className="mb-6 p-4 bg-muted rounded-lg">
-              <p className="text-sm font-medium mb-3 text-center">Escaneie o QR Code com seu WhatsApp</p>
-              <div className="flex justify-center">
-                <Image
-                  src={qrCode || "/placeholder.svg"}
-                  alt="QR Code WhatsApp"
-                  width={250}
-                  height={250}
-                  className="rounded-lg"
-                />
+            <div className="mb-6 p-6 bg-muted rounded-lg border-2 border-dashed">
+              <p className="text-sm font-medium mb-4 text-center">Escaneie o QR Code com seu WhatsApp</p>
+              <div className="flex justify-center bg-white p-4 rounded-lg">
+                <img src={qrCode || "/placeholder.svg"} alt="QR Code WhatsApp" className="w-64 h-64" />
               </div>
-              <p className="text-xs text-muted-foreground mt-3 text-center">
-                Abra o WhatsApp → Configurações → Aparelhos conectados → Conectar aparelho
-              </p>
+              <div className="mt-4 space-y-2">
+                <p className="text-xs text-muted-foreground text-center">
+                  <strong>Como conectar:</strong>
+                </p>
+                <ol className="text-xs text-muted-foreground space-y-1 pl-4">
+                  <li>1. Abra o WhatsApp no seu celular</li>
+                  <li>
+                    2. Toque em <strong>Mais opções</strong> ou <strong>Configurações</strong>
+                  </li>
+                  <li>
+                    3. Toque em <strong>Aparelhos conectados</strong>
+                  </li>
+                  <li>
+                    4. Toque em <strong>Conectar um aparelho</strong>
+                  </li>
+                  <li>5. Aponte seu celular para esta tela para escanear o código</li>
+                </ol>
+              </div>
             </div>
           )}
 
@@ -222,7 +210,9 @@ export default function CanaisPage() {
                 <CheckCircle className="w-5 h-5" />
                 <div>
                   <p className="font-medium">WhatsApp Conectado</p>
-                  <p className="text-sm text-muted-foreground">Suas conversas estão sincronizadas</p>
+                  <p className="text-sm text-muted-foreground">
+                    {phoneNumber ? `Número: ${phoneNumber}` : "Suas conversas estão sincronizadas"}
+                  </p>
                 </div>
               </div>
             </div>
@@ -261,37 +251,11 @@ export default function CanaisPage() {
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-semibold">Instagram Direct</h2>
                 <Badge variant="outline" className="text-xs">
-                  <XCircle className="w-3 h-3 mr-1" />
-                  Desconectado
+                  Em breve
                 </Badge>
               </div>
-              <p className="text-sm text-muted-foreground">Solução não oficial</p>
+              <p className="text-sm text-muted-foreground">Integração em desenvolvimento</p>
             </div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="instagram-user">Usuário do Instagram</Label>
-              <Input
-                id="instagram-user"
-                placeholder="alencar@gmail.com"
-                value={instagramUser}
-                onChange={(e) => setInstagramUser(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="instagram-pass">Senha</Label>
-              <Input id="instagram-pass" type="password" placeholder="••••••••" />
-            </div>
-
-            <Button onClick={() => handleConnect("instagram")} className="w-full">
-              Conectar Instagram
-            </Button>
-
-            <p className="text-xs text-muted-foreground">
-              Suas credenciais são criptografadas e armazenadas com segurança
-            </p>
           </div>
         </Card>
 
@@ -305,34 +269,11 @@ export default function CanaisPage() {
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-semibold">Email</h2>
                 <Badge variant="outline" className="text-xs">
-                  <XCircle className="w-3 h-3 mr-1" />
-                  Desconectado
+                  Em breve
                 </Badge>
               </div>
               <p className="text-sm text-muted-foreground">SMTP para envio de emails</p>
             </div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="smtp-host">Servidor SMTP</Label>
-              <Input id="smtp-host" placeholder="smtp.gmail.com" />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="smtp-port">Porta</Label>
-                <Input id="smtp-port" placeholder="587" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="smtp-user">Usuário</Label>
-                <Input id="smtp-user" placeholder="seu@email.com" />
-              </div>
-            </div>
-
-            <Button onClick={() => handleConnect("email")} className="w-full">
-              Conectar Email
-            </Button>
           </div>
         </Card>
 
@@ -346,25 +287,11 @@ export default function CanaisPage() {
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-semibold">SMS</h2>
                 <Badge variant="outline" className="text-xs">
-                  <XCircle className="w-3 h-3 mr-1" />
-                  Desconectado
+                  Em breve
                 </Badge>
               </div>
               <p className="text-sm text-muted-foreground">Envio de SMS via API</p>
             </div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="sms-api">API Key</Label>
-              <Input id="sms-api" type="password" placeholder="Digite sua API key" />
-            </div>
-
-            <Button onClick={() => handleConnect("sms")} className="w-full">
-              Conectar SMS
-            </Button>
-
-            <p className="text-xs text-muted-foreground">Suporta Twilio, Nexmo e outras plataformas</p>
           </div>
         </Card>
       </div>
